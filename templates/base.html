@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}RecoverAI{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<div class="app-shell">
+    <div class="mobile-backdrop" id="backdrop" onclick="App.closeSidebar()"></div>
+
+    <!-- ============ SIDEBAR ============ -->
+    <aside class="sidebar" id="sidebar">
+        <div class="side-brand">
+            <span class="logo-mark"><i class="bi bi-shield-check"></i></span>
+            <span>RecoverAI</span>
+        </div>
+
+        <nav class="side-nav">
+            <div class="side-title">Workspace</div>
+            <a href="/dashboard" class="{{ 'active' if active_nav=='dashboard' else '' }}"><i class="bi bi-speedometer2"></i>Dashboard</a>
+            <a href="/transactions" class="{{ 'active' if active_nav=='transactions' else '' }}"><i class="bi bi-list-ul"></i>Transactions</a>
+            <a href="/recovery" class="{{ 'active' if active_nav=='recovery' else '' }}"><i class="bi bi-arrow-repeat"></i>Recovery Queue</a>
+
+            <div class="side-title">Insights</div>
+            <a href="/analytics" class="{{ 'active' if active_nav=='analytics' else '' }}"><i class="bi bi-graph-up-arrow"></i>Analytics</a>
+            <a href="/audit-logs" class="{{ 'active' if active_nav=='audit-logs' else '' }}"><i class="bi bi-journal-text"></i>Audit Logs</a>
+
+            <div class="side-title">System</div>
+            <a href="/notifications" class="{{ 'active' if active_nav=='notifications' else '' }}">
+                <i class="bi bi-bell"></i>Notifications
+                <span class="badge-pill" id="sideNotifBadge" style="display:none">0</span>
+            </a>
+        </nav>
+
+        <div class="side-foot">
+            <div class="side-user">
+                <div class="avatar" id="userAvatar">A</div>
+                <div style="min-width:0">
+                    <div class="u-name" id="userName">User</div>
+                    <div class="u-role" id="userRole">—</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ============ MAIN ============ -->
+    <div class="main">
+        <header class="topbar">
+            <button class="icon-btn tb-menu-btn" onclick="App.openSidebar()" aria-label="Open menu"><i class="bi bi-list"></i></button>
+            <div>
+                <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/dashboard" class="text-decoration-none">RecoverAI</a></li>
+                        {% block breadcrumb %}{% endblock %}
+                    </ol>
+                </nav>
+            </div>
+            <div class="tb-actions">
+                <span class="d-none d-md-inline-flex align-items-center gap-1 badge 
+                    {% if rz_mode=='SIMULATED' %}badge-warning{% else %}badge-success{% endif %}"
+                    style="cursor:default" title="Payment gateway execution mode">
+                    <i class="bi {% if rz_mode=='SIMULATED' %}bi-broadcast{% else %}bi-link-45deg{% endif %}"></i>
+                    {{ rz_mode }}
+                </span>
+                <span class="d-none d-md-inline-flex align-items-center gap-1 badge
+                    {% if llm_configured %}badge-brand{% else %}badge-neutral{% endif %}"
+                    style="cursor:default" title="Recommendation engine">
+                    <i class="bi bi-cpu"></i>
+                    {% if llm_configured %}AI{% else %}Rules{% endif %}
+                </span>
+                {% block tb_actions %}{% endblock %}
+                <a href="/notifications" class="icon-btn tb-notif" title="Notifications">
+                    <i class="bi bi-bell"></i>
+                    <span class="notif-dot" id="tbNotifBadge" style="display:none">0</span>
+                </a>
+                <a href="#" class="icon-btn" title="Logout" onclick="App.logout(event)"><i class="bi bi-box-arrow-right"></i></a>
+            </div>
+        </header>
+
+        <div class="content">
+            {% block body %}{% endblock %}
+        </div>
+    </div>
+</div>
+
+<!-- ============ TOAST CONTAINER ============ -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:2000"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+window.App = {
+    user: {% if current_user.is_authenticated %}{
+        name: "{{ current_user.name or '' }}",
+        email: "{{ current_user.email or '' }}",
+        role: "{{ current_user.role or '' }}"
+    }{% else %}null{% endif %},
+
+    fmtINR(v) {
+        if (v === null || v === undefined) return '—';
+        v = Number(v);
+        if (isNaN(v)) return '—';
+        return '₹' + Math.round(v).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    },
+    fmtDate(iso) {
+        if (!iso) return '—';
+        try { return new Date(iso).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); }
+        catch(e) { return iso; }
+    },
+    fmtPct(v) { return (v===null||v===undefined) ? '—' : Number(v).toFixed(1)+'%'; },
+
+    toast(msg, type='success') {
+        const colors = { success:'var(--success)', danger:'var(--danger)', warning:'var(--warning)', info:'var(--info)' };
+        const border = colors[type] || colors.info;
+        const icon = { success:'bi-check-circle-fill', danger:'bi-x-octagon-fill', warning:'bi-exclamation-triangle-fill', info:'bi-info-circle-fill' }[type] || 'bi-info-circle-fill';
+        const el = document.createElement('div');
+        el.className = 'toast align-items-center border-0 show';
+        el.style.cssText = `border-left:4px solid ${border}; border-radius:12px; box-shadow:0 8px 24px rgba(16,24,40,.14); background:#fff;`;
+        el.innerHTML = `<div class="d-flex align-items-center p-3">
+            <i class="bi ${icon} me-2" style="color:${border};font-size:18px"></i>
+            <div class="me-2" style="font-size:13.5px;color:var(--ink-800)">${msg}</div>
+            <button type="button" class="btn-close ms-auto" onclick="this.closest('.toast').remove()"></button>
+        </div>`;
+        document.querySelector('.toast-container').appendChild(el);
+        setTimeout(()=>el.remove(), 4500);
+    },
+
+    openSidebar() { document.getElementById('sidebar').classList.add('open'); document.getElementById('backdrop').classList.add('show'); },
+    closeSidebar() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('backdrop').classList.remove('show'); },
+    onNav() { this.closeSidebar(); },
+
+    async logout(e) {
+        if (e) e.preventDefault();
+        try { await api.post('/api/auth/logout'); } catch(err) {}
+        window.location.href = '/login';
+    },
+
+    initShell() {
+        const u = this.user;
+        if (u) {
+            const initials = (u.name||u.email||'A').split(' ').map(s=>s[0]).join('').slice(0,2).toUpperCase();
+            if (document.getElementById('userAvatar')) document.getElementById('userAvatar').textContent = initials || 'A';
+            if (document.getElementById('userName')) document.getElementById('userName').textContent = u.name || u.email || 'User';
+            if (document.getElementById('userRole')) document.getElementById('userRole').textContent = (u.role||'').replace(/_/g,' ');
+        }
+        this.refreshNotifBadge();
+    },
+
+    async refreshNotifBadge() {
+        try {
+            const res = await api.get('/api/notifications?page_size=1');
+            if (res.success && res.unread_count > 0) {
+                const n = res.unread_count > 99 ? '99+' : res.unread_count;
+                const tb = document.getElementById('tbNotifBadge');
+                const sb = document.getElementById('sideNotifBadge');
+                if (tb){ tb.style.display='flex'; tb.textContent=n; }
+                if (sb){ sb.style.display='inline-block'; sb.textContent=n; }
+            }
+        } catch(e) {}
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => App.initShell());
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

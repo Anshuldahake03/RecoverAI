@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Transaction - RecoverAI{% endblock %}
+{% block page_title %}Transaction detail{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="/transactions" class="text-decoration-none">Transactions</a></li>
+<li class="breadcrumb-item active" aria-current="page">{{ transaction_id }}</li>
+{% endblock %}
+{% block tb_actions %}
+{% if current_user.is_authenticated and current_user.has_role('MERCHANT_ADMIN','REVIEWER') %}
+<button class="btn btn-primary btn-sm" id="analyzeBtn" onclick="runAnalyze()"><i class="bi bi-stars me-1"></i>Predict &amp; recommend</button>
+{% endif %}
+{% endblock %}
+
+{% block body %}
+<div id="detailRoot">
+    <div class="state-box"><div class="spinner-border spinner"></div><p style="font-size:13px;margin-top:10px">Loading transaction...</p></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const TXN_ID = "{{ transaction_id }}";
+const ACTION_BADGE={'RETRY':'badge-brand','SEND_PAYMENT_LINK':'badge-info','SEND_REMINDER':'badge-warning','ESCALATE':'badge-danger','NO_ACTION':'badge-neutral'};
+const ACTION_LABEL={'RETRY':'Retry payment','SEND_PAYMENT_LINK':'Send payment link','SEND_REMINDER':'Send reminder','ESCALATE':'Escalate to manual review','NO_ACTION':'No action'};
+const ACTION_STATUS_BADGE={'PENDING':'badge-warning','APPROVED':'badge-brand','EXECUTING':'badge-info','COMPLETED':'badge-success','FAILED':'badge-danger','REJECTED':'badge-neutral'};
+
+function scoreBadge(p) {
+    if (p===null||p===undefined) return {cls:'badge-neutral',label:'Not scored'};
+    if (p>=0.7) return {cls:'badge-success',label:'High'};
+    if (p>=0.4) return {cls:'badge-warning',label:'Medium'};
+    return {cls:'badge-danger',label:'Low'};
+}
+
+async function loadDetail() {
+    const root = document.getElementById('detailRoot');
+    try {
+        const res = await api.get('/api/recovery/' + TXN_ID);
+        if (!res.success) {
+            root.innerHTML = `<div class="state-box py-5"><i class="bi bi-exclamation-triangle state-icon"></i><h5>Transaction not found</h5><a href="/transactions" class="btn btn-primary btn-sm mt-2">Back to transactions</a></div>`;
+            return;
+        }
+        const t = res.transaction, p = res.prediction, r = res.recommendation, acts = res.actions||[];
+        const sb = scoreBadge(p?.probability);
+        const txnStatus = t.status||'-';
+        const statusCls = {'RECOVERED':'badge-success','SUCCESS':'badge-success','FAILED':'badge-danger','PENDING':'badge-warning','DECLINED':'badge-danger'}[txnStatus]||'badge-neutral';
+        const cust = t.customer||{};
+        const confColor = r ? (r.confidence>=0.7?'var(--success)':r.confidence>=0.4?'var(--warning)':'var(--danger)') : 'var(--muted)';
+
+        root.innerHTML = `
+        <!-- Header strip -->
+        <div class="card mb-4">
+            <div class="card-body d-flex flex-wrap align-items-center gap-3">
+                <div style="flex:1;min-width:180px">
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="font-mono" style="font-weight:700;font-size:16px;color:var(--ink-900)">${t.transaction_id}</span>
+                        <span class="badge ${statusCls}">${txnStatus}</span>
+                    </div>
+                    <div style="font-size:12.5px;color:var(--muted)">Created ${App.fmtDate(t.created_at)}</div>
+                </div>
+                <div class="text-md-start">
+                    <div style="font-size:12px;color:var(--muted)">AMOUNT</div>
+                    <div style="font-size:26px;font-weight:800;color:var(--ink-900);letter-spacing:-.02em">${App.fmtINR(t.amount)}</div>
+                </div>
+                <div>
+                    <div style="font-size:12px;color:var(--muted)">PAYMENT</div>
+                    <div class="fw-semibold" style="text-transform:capitalize">${(t.payment_method||'-').replace(/_/g,' ')}</div>
+                </div>
+                <div>
+                    <div style="font-size:12px;color:var(--muted)">RETRY COUNT</div>
+                    <div class="fw-semibold">${t.retry_count||0}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3">
+            <!-- Left: prediction + recommendation -->
+            <div class="col-lg-8">
+                <div class="row g-3">
+                    <!-- Prediction -->
+                    <div class="col-md-6">
+                        <div class="card h-100"><div class="card-body">
+                            <div class="d-flex align-items-center justify-content-between mb-3">
+                                <h6 class="card-title">Recovery Prediction</h6>
+                                <span class="badge ${sb.cls}">${sb.label}</span>
+                            </div>
+                            ${p ? `
+                            <div class="text-center mb-3">
+                                <div style="font-size:40px;font-weight:800;color:var(--brand-600)">${Math.round(p.probability*100)}%</div>
+                                <div style="font-size:12px;color:var(--muted)">probability of recovery</div>
+                            </div>
+                            <div class="prob-bar mb-2"><div style="width:${Math.round(p.probability*100)}%;background:var(--brand-600)"></div></div>
+                            <div class="d-flex justify-content-between" style="font-size:12px;color:var(--muted)">
+                                <span>Model ${p.model_version||'—'}</span><span>Features ${p.feature_version||'—'}</span>
+                            </div>
+                            <div class="text-center mt-2" style="font-size:11.5px;color:var(--muted)">${App.fmtDate(p.created_at)}</div>
+                            ` : `
+                            <div class="state-box" style="padding:24px"><i class="bi bi-stars state-icon"></i><p style="font-size:12.5px">No prediction yet. Run "Predict &amp; recommend" to score this transaction.</p></div>
+                            `}
+                        </div></div>
+                    </div>
+                    <!-- Recommendation -->
+                    <div class="col-md-6">
+                        <div class="card h-100"><div class="card-body">
+                            <div class="d-flex align-items-center justify-content-between mb-3">
+                                <h6 class="card-title">Recommendation</h6>
+                                ${r ? `<span class="badge ${ACTION_BADGE[r.action]||'badge-neutral'}">${r.action}</span>` : ''}
+                            </div>
+                            ${r ? `
+                            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Confidence</div>
+                            <div class="prob-bar mb-3"><div style="width:${Math.round(r.confidence*100)}%;background:${confColor}"></div></div>
+                            <div class="mb-2" style="font-size:13px;color:var(--ink-800)">${r.reason||''}</div>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <span class="badge badge-brand">${r.decision_source==='AI_AGENT'?'AI Engine':'Rule-based'}</span>
+                                ${r.requires_approval ? '<span class="badge badge-warning">Requires human approval</span>' : '<span class="badge badge-success">Auto-eligible</span>'}
+                            </div>
+                            <div style="font-size:11.5px;color:var(--muted)">${App.fmtDate(r.created_at)}</div>
+                            ` : `
+                            <div class="state-box" style="padding:24px"><i class="bi bi-lightbulb state-icon"></i><p style="font-size:12.5px">No recommendation generated yet for this transaction.</p></div>
+                            `}
+                        </div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: customer + recovery status -->
+            <div class="col-lg-4">
+                <div class="card mb-3"><div class="card-body">
+                    <h6 class="card-title mb-3">Customer</h6>
+                    <div class="detail-row"><span class="dt">Cross-sell ID</span><span class="dd font-mono">${cust.external_customer_id||'—'}</span></div>
+                    <div class="detail-row"><span class="dt">Success rate</span><span class="dd">${cust.success_rate? (cust.success_rate*100).toFixed(1)+'%':'—'}</span></div>
+                    <div class="detail-row"><span class="dt">Successful / Failed</span><span class="dd">${cust.successful_count||0} / ${cust.failed_count||0}</span></div>
+                    <div class="detail-row"><span class="dt">Account age</span><span class="dd">${cust.account_age_days? cust.account_age_days+' days':'—'}</span></div>
+                </div></div>
+
+                <div class="card"><div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <h6 class="card-title">Recovery actions</h6>
+                        <span class="badge badge-neutral">${acts.length} total</span>
+                    </div>
+                    ${acts.length ? `<div class="timeline" style="padding-left:22px">
+                        ${acts.map(a => `
+                        <div class="timeline-item">
+                            <div class="d-flex align-items-center justify-content-between">
+                                <span class="tl-title">${ACTION_LABEL[a.action]||a.action}</span>
+                                <span class="badge ${ACTION_STATUS_BADGE[a.status]||'badge-neutral'}">${a.status}</span>
+                            </div>
+                            ${a.result?`<div style="font-size:11.5px;color:var(--muted)">${a.result}</div>`:''}
+                            <div class="tl-time">${App.fmtDate(a.executed_at||a.created_at)}</div>
+                        </div>`).join('')}
+                    </div>` : '<p class="text-muted-sub" style="font-size:12.5px;padding:10px 0">No recovery actions executed yet.</p>'}
+                </div></div>
+            </div>
+        </div>
+        `;
+        updateAnalyzeBtn(r);
+    } catch(e) { console.error(e); root.innerHTML = `<div class="state-box py-5"><i class="bi bi-exclamation-triangle state-icon"></i><h5>Failed to load</h5></div>`; }
+}
+
+function updateAnalyzeBtn(r) {
+    const btn = document.getElementById('analyzeBtn');
+    if (!btn) return;
+    if (r && r.action && r.requires_approval) { btn.textContent = 'Re-generate recommendation'; }
+}
+
+async function runAnalyze() {
+    const btn = document.getElementById('analyzeBtn');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled=true; btn.innerHTML='<span class="btn-spinner"></span> Analyzing...'; }
+    try {
+        const res = await api.post('/api/transactions/' + TXN_ID + '/analyze');
+        if (res.success) {
+            if (res.notice) App.toast(res.notice, 'warning');
+            else App.toast('Prediction & recommendation updated', 'success');
+            await loadDetail();
+        } else {
+            App.toast(res.error?.message || 'Analysis failed', 'danger');
+        }
+    } catch(e) {
+        console.error(e);
+        App.toast('Analysis failed', 'danger');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    }
+}
+
+loadDetail();
+</script>
+{% endblock %}

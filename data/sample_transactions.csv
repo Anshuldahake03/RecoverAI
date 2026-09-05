@@ -1,0 +1,16 @@
+customer_id,transaction_id,amount,currency,payment_method,status,failure_reason,retry_count,previous_success_count,previous_failure_count,historical_success_rate,account_age_days
+CUST-001,UPL-TXN-1001,4500.00,INR,upi,FAILED,temporary_failure,0,18,3,0.86,420
+CUST-002,UPL-TXN-1002,12500.00,INR,card,FAILED,technical_error,0,24,6,0.80,780
+CUST-003,UPL-TXN-1003,780.00,INR,wallet,FAILED,insufficient_funds,0,5,8,0.38,95
+CUST-004,UPL-TXN-1004,2200.00,INR,netbanking,FAILED,authentication_failed,0,11,2,0.85,150
+CUST-005,UPL-TXN-1005,560.00,INR,upi,FAILED,bank_declined,0,3,9,0.25,40
+CUST-006,UPL-TXN-1006,15900.00,INR,card,FAILED,temporary_failure,0,22,4,0.85,610
+CUST-007,UPL-TXN-1007,1990.00,INR,upi,FAILED,technical_error,1,9,3,0.75,300
+CUST-008,UPL-TXN-1008,310.00,INR,wallet,FAILED,card_expired,0,1,4,0.20,25
+CUST-009,UPL-TXN-1009,7300.00,INR,netbanking,FAILED,temporary_failure,0,15,5,0.75,210
+CUST-010,UPL-TXN-1010,900.00,INR,upi,FAILED,authentication_failed,0,7,1,0.88,900
+CUST-010,UPL-TXN-1011,23400.00,INR,emi,FAILED,temporary_failure,0,19,2,0.90,720
+CUST-011,UPL-TXN-1012,4600.00,INR,upi,FAILED,insufficient_funds,1,6,6,0.50,85
+CUST-012,UPL-TXN-1013,1200.00,INR,card,FAILED,technical_error,0,4,2,0.67,60
+CUST-013,UPL-TXN-1014,800.00,INR,upi,FAILED,bank_declined,0,2,5,0.29,35
+CUST-014,UPL-TXN-1015,5600.00,INR,netbanking,FAILED,temporary_failure,0,16,4,0.80,350

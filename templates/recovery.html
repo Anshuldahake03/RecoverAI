@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Recovery Queue - RecoverAI{% endblock %}
+{% block page_title %}Recovery Queue{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Recommendations & actions</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" onclick="loadRecovery(txPage)"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+{% endblock %}
+
+{% block body %}
+<!-- STATUS TABS -->
+<ul class="nav nav-pills mb-3 gap-1" id="statusTabs">
+    <li class="nav-item"><button class="nav-link active" data-status="" onclick="setStatus('')">All</button></li>
+    <li class="nav-item"><button class="nav-link" data-status="FAILED" onclick="setStatus('FAILED')">Pending</button></li>
+    <li class="nav-item"><button class="nav-link" data-status="RECOVERED" onclick="setStatus('RECOVERED')">Recovered</button></li>
+</ul>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Transaction</th>
+                        <th>Amount</th>
+                        <th>Failure</th>
+                        <th>Probability</th>
+                        <th>Recommended action</th>
+                        <th>Decision</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="recTbody"></tbody>
+            </table>
+        </div>
+        <div id="recState" style="display:none"></div>
+    </div>
+</div>
+
+<div class="d-flex align-items-center justify-content-between mt-3 flex-wrap gap-2">
+    <div class="text-muted-sub" style="font-size:12.5px" id="recMeta">—</div>
+    <nav><ul class="pagination pagination-sm mb-0" id="recPagination"></ul></nav>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let txPage=1, txTotal=0, txTotalPages=1, activeStatus='';
+const ACTION_BADGE={'RETRY':'badge-brand','SEND_PAYMENT_LINK':'badge-info','SEND_REMINDER':'badge-warning','ESCALATE':'badge-danger','NO_ACTION':'badge-neutral'};
+const TX_STATUS_CLS={'RECOVERED':'badge-success','SUCCESS':'badge-success','FAILED':'badge-danger','PENDING':'badge-warning'};
+const CAN_ACT = {% if current_user.is_authenticated and current_user.has_role('MERCHANT_ADMIN','REVIEWER') %}true{% else %}false{% endif %};
+
+function setStatus(s) {
+    activeStatus=s;
+    document.querySelectorAll('#statusTabs .nav-link').forEach(b=>b.classList.toggle('active', b.dataset.status===s));
+    loadRecovery(1);
+}
+
+async function loadRecovery(page=1) {
+    txPage=page;
+    const tb = document.getElementById('recTbody');
+    tb.innerHTML = `<tr><td colspan="8"><div class="state-box" style="padding:40px"><div class="spinner-border spinner"></div><p style="font-size:13px;margin-top:10px">Loading recovery queue...</p></div></td></tr>`;
+    document.getElementById('recState').style.display='none';
+    const params = new URLSearchParams({ page:txPage, page_size:25 });
+    if (activeStatus) params.set('status', activeStatus);
+    try {
+        const res = await api.get('/api/recovery?'+params.toString());
+        if (!res.success) { showState('Error loading recovery queue', true); return; }
+        const list = res.recommendations||[];
+        tb.innerHTML = list.map(renderRow).join('');
+        txTotal=res.total; txTotalPages=res.total_pages;
+        document.getElementById('recMeta').textContent = `${list.length} of ${res.total} recommendations`;
+        renderPagination();
+        if (!list.length) { tb.innerHTML=''; showState('No recommendations in this view. Run "Predict &amp; recommend" on failed transactions to populate the queue.'); }
+    } catch(e){ console.error(e); showState('Failed to load recovery queue', true); }
+}
+
+function renderRow(r) {
+    const t = r.transaction||{};
+    const conf = Math.round((r.confidence||0)*100);
+    const confColor = conf>=70?'var(--success)':conf>=40?'var(--warning)':'var(--danger)';
+    return `<tr>
+        <td class="cursor-pointer" onclick="location.href='/transactions/${t.transaction_id}'">
+            <div class="font-mono" style="font-size:12.5px;font-weight:600;color:var(--ink-900)">${t.transaction_id||'-'}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${App.fmtDate(r.created_at)}</div>
+        </td>
+        <td class="fw-semibold">${App.fmtINR(t.amount)}</td>
+        <td><span style="text-transform:capitalize;font-size:12.5px">${(t.failure_reason||'-').replace(/_/g,' ')}</span></td>
+        <td>
+            <div class="d-flex align-items-center gap-2">
+                <div class="prob-bar" style="width:54px"><div style="width:${conf}%;background:${confColor}"></div></div>
+                <span style="font-size:12px;font-weight:600;color:${confColor}">${conf}%</span>
+            </div>
+        </td>
+        <td><span class="badge ${ACTION_BADGE[r.action]||'badge-neutral'}">${r.action}</span></td>
+        <td><span class="badge ${r.decision_source==='AI_AGENT'?'badge-brand':'badge-neutral'}">${r.decision_source==='AI_AGENT'?'AI':'Rule'}</span></td>
+        <td><span class="badge ${TX_STATUS_CLS[t.status]||'badge-neutral'}">${t.status||'-'}</span></td>
+        <td class="text-end">
+            <div class="d-inline-flex gap-1">
+                <button class="btn btn-outline btn-sm" onclick="location.href='/transactions/${t.transaction_id}'" title="Detail"><i class="bi bi-arrow-right"></i></button>
+                ${ r.requires_approval && CAN_ACT ? `
+                <button class="btn btn-sm" style="background:var(--success-bg);color:var(--success)" onclick="approve('${t.transaction_id}')" title="Approve"><i class="bi bi-check-lg"></i></button>
+                <button class="btn btn-sm" style="background:var(--danger-bg);color:var(--danger)" onclick="reject('${t.transaction_id}')" title="Reject"><i class="bi bi-x-lg"></i></button>` : ''}
+                ${ r.action && r.action!=='NO_ACTION' ? `<button class="btn btn-primary btn-sm" onclick="execute('${t.transaction_id}')">Execute</button>` : ''}
+            </div>
+        </td>
+    </tr>`;
+}
+
+async function approve(txnId) {
+    const res = await api.post(`/api/recovery/${txnId}/approve`);
+    if (res.success) { App.toast('Recommendation approved'); loadRecovery(txPage); }
+    else App.toast(res.error?.message || 'Approval failed', 'danger');
+}
+async function reject(txnId) {
+    const res = await api.post(`/api/recovery/${txnId}/reject`);
+    if (res.success) { App.toast('Recommendation rejected'); loadRecovery(txPage); }
+    else App.toast(res.error?.message || 'Rejection failed', 'danger');
+}
+async function execute(txnId) {
+    const res = await api.post(`/api/recovery/${txnId}/execute`);
+    if (res.success) { App.toast('Recovery action executed'); App.refreshNotifBadge(); loadRecovery(txPage); }
+    else App.toast(res.error?.message || 'Execution failed', 'danger');
+}
+
+function showState(msg, isErr=false) {
+    const s=document.getElementById('recState');
+    s.style.display='block';
+    s.innerHTML=`<div class="state-box" style="padding:44px"><i class="bi ${isErr?'bi-exclamation-triangle':'bi-inbox'} state-icon"></i><h5>${isErr?'Something went wrong':'No recommendations'}</h5><p style="font-size:13px;max-width:420px;margin:0 auto">${msg}</p></div>`;
+    document.getElementById('recTbody').innerHTML='';
+}
+
+function renderPagination() {
+    const nav=document.getElementById('recPagination');
+    if (txTotalPages<=1){ nav.innerHTML=''; return; }
+    let h=`<li class="page-item ${txPage<=1?'disabled':''}"><button class="page-link" onclick="loadRecovery(${txPage-1})"><i class="bi bi-chevron-left"></i></button></li>`;
+    for(let p=1;p<=txTotalPages;p++){ if(txTotalPages>8&&p>1&&p<txTotalPages&&Math.abs(p-txPage)>2){if(p===2)h+=`<li class="page-item disabled"><span class="page-link">…</span></li>`;continue;} h+=`<li class="page-item ${p===txPage?'active':''}"><button class="page-link" onclick="loadRecovery(${p})">${p}</button></li>`; }
+    h+=`<li class="page-item ${txPage>=txTotalPages?'disabled':''}"><button class="page-link" onclick="loadRecovery(${txPage+1})"><i class="bi bi-chevron-right"></i></button></li>`;
+    nav.innerHTML=h;
+}
+
+loadRecovery();
+</script>
+{% endblock %}

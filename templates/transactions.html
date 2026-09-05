@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Transactions - RecoverAI{% endblock %}
+{% block page_title %}Transactions{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">All transactions</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" onclick="loadTx()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+{% endblock %}
+
+{% block body %}
+<!-- FILTER BAR -->
+<div class="filter-bar">
+    <div class="row g-2">
+        <div class="col-12 col-md-3">
+            <input type="text" class="form-control" id="fSearch" placeholder="Search TXN ID...">
+        </div>
+        <div class="col-6 col-md-2">
+            <select class="form-select" id="fStatus">
+                <option value="">All statuses</option>
+                <option value="FAILED">Failed</option>
+                <option value="RECOVERED">Recovered</option>
+                <option value="SUCCESS">Success</option>
+                <option value="PENDING">Pending</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <select class="form-select" id="fReason">
+                <option value="">All reasons</option>
+                <option value="temporary_failure">Temporary failure</option>
+                <option value="insufficient_funds">Insufficient funds</option>
+                <option value="card_expired">Card expired</option>
+                <option value="bank_declined">Bank declined</option>
+                <option value="authentication_failed">Auth failed</option>
+                <option value="technical_error">Technical error</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <select class="form-select" id="fPayment">
+                <option value="">All methods</option>
+                <option value="upi">UPI</option>
+                <option value="card">Card</option>
+                <option value="netbanking">Netbanking</option>
+                <option value="wallet">Wallet</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <select class="form-select" id="fSort">
+                <option value="created_at">Sort: Newest</option>
+                <option value="amount">Sort: Amount</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-2">
+            <select class="form-select" id="fSource" disabled>
+                <option value="">All batches</option>
+            </select>
+        </div>
+        <div class="col-12 col-md-1 d-flex gap-2">
+            <button class="btn btn-primary w-100" onclick="loadTx(1)"><i class="bi bi-search"></i></button>
+            <button class="btn btn-outline" onclick="resetFilters()" title="Reset"><i class="bi bi-arrow-counterclockwise"></i></button>
+        </div>
+    </div>
+</div>
+
+<!-- TABLE CARD -->
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Transaction</th>
+                        <th class="cursor-pointer" onclick="sortBy('amount')">Amount <i class="bi bi-arrow-down-up" style="font-size:10px"></i></th>
+                        <th>Payment</th>
+                        <th>Failure</th>
+                        <th>Score</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="txTbody"></tbody>
+            </table>
+        </div>
+        <div id="txState" style="display:none"></div>
+    </div>
+</div>
+
+<!-- PAGINATION -->
+<div class="d-flex align-items-center justify-content-between mt-3 flex-wrap gap-2">
+    <div class="text-muted-sub" style="font-size:12.5px" id="txMeta">—</div>
+    <nav>
+        <ul class="pagination pagination-sm mb-0" id="pagination"></ul>
+    </nav>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let txPage=1, txTotal=0, txTotalPages=1, sortOrder='desc';
+const STATUS_BADGE={'SUCCESS':'badge-success','RECOVERED':'badge-success','FAILED':'badge-danger','PENDING':'badge-warning','DECLINED':'badge-danger'};
+
+function currentFilters() {
+    return new URLSearchParams({
+        page: txPage,
+        page_size: 25,
+        search: document.getElementById('fSearch').value.trim() || '',
+        status: document.getElementById('fStatus').value,
+        failure_reason: document.getElementById('fReason').value,
+        payment_method: document.getElementById('fPayment').value,
+        source: document.getElementById('fSource').value,
+        sort: document.getElementById('fSort').value,
+        sort_order: sortOrder
+    });
+}
+
+async function loadTx(page=1) {
+    txPage = page;
+    const tb = document.getElementById('txTbody');
+    tb.innerHTML = `<tr><td colspan="7"><div class="state-box" style="padding:40px"><div class="spinner-border spinner"></div><p style="font-size:13px;margin-top:10px">Loading transactions...</p></div></td></tr>`;
+    document.getElementById('txState').style.display='none';
+    try {
+        const res = await api.get('/api/transactions?' + currentFilters().toString());
+        if (!res.success) { showState('Error loading transactions', true); return; }
+        tb.innerHTML = res.transactions.map(renderRow).join('');
+        txTotal = res.total; txTotalPages = res.total_pages;
+        document.getElementById('txMeta').textContent = `Showing ${res.transactions.length} of ${res.total} transactions`;
+        renderPagination();
+    } catch(e) { console.error(e); showState('Failed to load transactions', true); }
+}
+
+function renderRow(t) {
+    const prob = t.prediction_probability;
+    let scoreCell;
+    if (prob === null || prob === undefined) {
+        scoreCell = `<span class="badge badge-neutral">—</span>`;
+    } else {
+        const p = Math.round(prob*100);
+        const color = p>=70?'var(--success)':p>=40?'var(--warning)':'var(--danger)';
+        scoreCell = `<div class="d-flex align-items-center gap-2">
+            <div class="prob-bar" style="width:54px"><div style="width:${p}%;background:${color}"></div></div>
+            <span style="font-size:12px;font-weight:600;color:${color}">${p}%</span>
+        </div>`;
+    }
+    return `<tr class="table-row-link" onclick="location.href='/transactions/${t.transaction_id}'">
+        <td>
+            <div class="font-mono" style="font-size:12.5px;font-weight:600;color:var(--ink-900)">${t.transaction_id}</div>
+            <div style="font-size:11.5px;color:var(--muted)">${(t.payment_method||'').toUpperCase()} · ${(t.failure_reason||'-').replace(/_/g,' ')}</div>
+            ${t.source?`<span class="badge badge-neutral" style="font-size:10px;margin-top:2px">${t.source}</span>`:''}
+        </td>
+        <td class="fw-semibold">${App.fmtINR(t.amount)}</td>
+        <td><span style="text-transform:capitalize">${(t.payment_method||'-').replace(/_/g,' ')}</span></td>
+        <td><span style="text-transform:capitalize;font-size:12.5px">${(t.failure_reason||'-').replace(/_/g,' ')}</span></td>
+        <td>${scoreCell}</td>
+        <td><span class="badge ${STATUS_BADGE[t.status]||'badge-neutral'}">${t.status||'-'}</span></td>
+        <td class="text-end" onclick="event.stopPropagation()">
+            ${t.status==='FAILED' ? `<button class="btn btn-outline btn-sm me-1" onclick="openAnalyze('${t.transaction_id}', this)" title="Predict & recommend"><i class="bi bi-stars"></i></button>`:''}
+            <button class="btn btn-outline btn-sm" onclick="location.href='/transactions/${t.transaction_id}'" title="View detail"><i class="bi bi-arrow-right"></i></button>
+        </td>
+    </tr>`;
+}
+
+async function openAnalyze(txnId, btn) {
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span>';
+    try {
+        const res = await api.post(`/api/transactions/${txnId}/analyze`);
+        if (res.success) {
+            if (res.notice) {
+                App.toast(res.notice, 'warning');
+            } else {
+                const p = res.prediction, r = res.recommendation;
+                const msg = `Scored ${Math.round((p?.probability||0)*100)}% · recommended ${r?.action||'—'}`;
+                App.toast(msg);
+            }
+            await loadTx(txPage);
+        } else {
+            App.toast(res.error?.message || 'Analysis failed', 'danger');
+        }
+    } catch(e) { App.toast('Analysis failed', 'danger'); }
+    finally { btn.disabled=false; btn.innerHTML=orig; }
+}
+
+function showState(msg, isErr=false) {
+    const s = document.getElementById('txState');
+    s.style.display='block';
+    s.innerHTML = `<div class="state-box" style="padding:40px"><i class="bi ${isErr?'bi-exclamation-triangle':'bi-inbox'} state-icon"></i><h5>${isErr?'Something went wrong':'No transactions found'}</h5><p style="font-size:13px">${msg}</p></div>`;
+    document.getElementById('txTbody').innerHTML='';
+}
+
+function renderPagination() {
+    const nav = document.getElementById('pagination');
+    if (txTotalPages <= 1) { nav.innerHTML=''; return; }
+    let html = `<li class="page-item ${txPage<=1?'disabled':''}"><button class="page-link" onclick="loadTx(${txPage-1})"><i class="bi bi-chevron-left"></i></button></li>`;
+    for (let p=1; p<=txTotalPages; p++) {
+        if (txTotalPages>8 && p>1 && p<txTotalPages && Math.abs(p-txPage)>2) {
+            if (p===2) html += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+            continue;
+        }
+        html += `<li class="page-item ${p===txPage?'active':''}"><button class="page-link" onclick="loadTx(${p})">${p}</button></li>`;
+    }
+    html += `<li class="page-item ${txPage>=txTotalPages?'disabled':''}"><button class="page-link" onclick="loadTx(${txPage+1})"><i class="bi bi-chevron-right"></i></button></li>`;
+    nav.innerHTML = html;
+}
+
+function sortBy(key) {
+    const sel = document.getElementById('fSort');
+    sel.value = key;
+    sortOrder = (sortOrder==='desc')?'asc':'desc';
+    loadTx(1);
+}
+
+function resetFilters() {
+    ['fSearch','fStatus','fReason','fPayment','fSource'].forEach(id=>document.getElementById(id).value='');
+    document.getElementById('fSort').value='created_at';
+    sortOrder='desc';
+    loadTx(1);
+}
+
+document.getElementById('fSearch').addEventListener('keydown', e=>{ if(e.key==='Enter') loadTx(1); });
+['fStatus','fReason','fPayment','fSort','fSource'].forEach(id=>document.getElementById(id).addEventListener('change', ()=>loadTx(1)));
+
+(async function initSources() {
+    const sel = document.getElementById('fSource');
+    try {
+        const res = await api.get('/api/transactions/import-batches');
+        if (res.success && res.batches) {
+            res.batches.forEach(b => {
+                const o = document.createElement('option');
+                o.value = b.source; o.textContent = b.source;
+                sel.appendChild(o);
+            });
+            sel.disabled = false;
+        }
+    } catch(e) { console.error(e); }
+    const qs = new URLSearchParams(location.search);
+    const src = qs.get('source');
+    if (src) {
+        sel.value = src;
+        if (sel.value !== src) {
+            const o = document.createElement('option');
+            o.value = src; o.textContent = src;
+            sel.appendChild(o); sel.value = src;
+        }
+        const badge = document.querySelector('.breadcrumb-item.active');
+        if (badge) badge.textContent = `Batch: ${src}`;
+        document.querySelector('#txMeta') && (document.getElementById('txMeta').textContent = 'Loading…');
+    }
+    loadTx();
+})();
+</script>
+{% endblock %}

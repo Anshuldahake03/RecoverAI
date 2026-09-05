@@ -1,0 +1,479 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - RecoverAI{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Overview</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" onclick="App.refreshNotifBadge(); loadDashboard()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+{% endblock %}
+
+{% block body %}
+<!-- KPI CARDS -->
+<div class="row g-3 mb-4" id="kpiRow"></div>
+
+<!-- CHARTS ROW -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <div>
+                        <h6 class="card-title mb-1">Revenue Recovery</h6>
+                        <span class="card-subtitle">Recovered vs at-risk revenue</span>
+                    </div>
+                    <span class="badge badge-brand" id="revStat"></span>
+                </div>
+                <div class="chart-wrap"><canvas id="revChart" class="chart-box"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h6 class="card-title mb-3">Failure Reasons</h6>
+                <div class="chart-wrap"><canvas id="failureChart" class="chart-box"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MIDDLE ROW -->
+<div class="row g-3 mb-4">
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="card-title">Recent Transactions</h6>
+                    <a href="/transactions" class="btn btn-ghost btn-sm">View all <i class="bi bi-arrow-right"></i></a>
+                </div>
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead><tr><th>ID</th><th>Amount</th><th>Payment</th><th>Status</th><th>Created</th></tr></thead>
+                        <tbody id="recentTxTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <h6 class="card-title">Recent Activity</h6>
+                    <a href="/audit-logs" class="btn btn-ghost btn-sm">Audit log <i class="bi bi-arrow-right"></i></a>
+                </div>
+                <div class="timeline" id="activityTimeline"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- RECOVERY QUEUE SNAPSHOT -->
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <div>
+                        <h6 class="card-title mb-1">Recommendation Engine</h6>
+                        <span class="card-subtitle">AI recovery recommendations awaiting action</span>
+                    </div>
+                    <a href="/recovery" class="btn btn-primary btn-sm">Open recovery queue <i class="bi bi-arrow-right ms-1"></i></a>
+                </div>
+                <div class="row g-3" id="recEngineRow"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- UPLOAD & AUTO-RECOVER -->
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+                    <div>
+                        <h6 class="card-title mb-1"><i class="bi bi-cloud-arrow-up me-1 text-brand"></i>Upload &amp; Auto-Recover</h6>
+                        <span class="card-subtitle">Download the sample format, then upload a CSV of failed transactions. RecoverAI will predict recoverability, recommend an action, and auto-execute eligible recoveries — with the reason for every case.</span>
+                    </div>
+                    <a href="/api/transactions/sample-csv" class="btn btn-outline btn-sm text-nowrap"><i class="bi bi-download me-1"></i>Sample CSV</a>
+                </div>
+
+                <div id="uploadBox">
+                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('csvFile').click()">
+                        <div class="upload-zone-inner">
+                            <i class="bi bi-cloud-arrow-up upload-icon"></i>
+                            <div class="upload-title">Drop your CSV here or click to browse</div>
+                            <div class="upload-hint"><span id="fileName">recoverai_sample_transactions.csv</span> · max 10MB · headers required</div>
+                            <input type="file" id="csvFile" accept=".csv" hidden onclick="event.stopPropagation()">
+                        </div>
+                        <div class="d-flex gap-2 mt-1 flex-wrap">
+                            <input type="text" id="batchName" class="form-control" style="max-width:220px" placeholder="Batch name (optional)">
+                            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();document.getElementById('csvFile').click()">Choose file</button>
+                            <button class="btn btn-primary btn-sm text-nowrap" id="autoRecoverBtn" onclick="uploadAndRecover()">
+                                <i class="bi bi-magic me-1"></i>Upload &amp; Auto-Recover
+                            </button>
+                        </div>
+                        <div class="upload-hint mt-1" style="text-align:left">Each upload becomes its own batch. Blank = named after the file. Existing batches are never overwritten — see them below.</div>
+                    </div>
+                </div>
+
+                <div id="recoverReport"></div>
+            </div>
+        </div>
+
+        <!-- BATCHES -->
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-start justify-content-between gap-3 flex-wrap mb-3">
+                    <div>
+                        <h6 class="card-title mb-1"><i class="bi bi-collection me-1 text-brand"></i>Your upload batches</h6>
+                        <span class="card-subtitle">Each uploaded CSV is kept separate. See it side by side, or open just that batch in Transactions.</span>
+                    </div>
+                    <a href="/transactions" class="btn btn-outline btn-sm text-nowrap"><i class="bi bi-arrow-right me-1"></i>All transactions</a>
+                </div>
+                <div id="batchesBox"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let revChart, failureChart;
+
+function kpiCards(o) {
+    const items = [
+        { label:'Total Transactions', value: (o.total_transactions||0).toLocaleString(), icon:'bi-stack', cls:'kpi-bg-brand', hint:'Across all merchants' },
+        { label:'Failed Transactions', value: (o.failed_transactions||0).toLocaleString(), icon:'bi-x-octagon', cls:'kpi-bg-danger', hint:'Open recovery candidates' },
+        { label:'Revenue at Risk', value: App.fmtINR(o.revenue_at_risk), icon:'bi-exclamation-triangle', cls:'kpi-bg-warning', hint:'Potentially recoverable' },
+        { label:'Recovered Revenue', value: App.fmtINR(o.recovered_revenue), icon:'bi-cash-stack', cls:'kpi-bg-success', hint:'Successful recoveries' },
+        { label:'Successful Recoveries', value: (o.successful_recoveries||0).toLocaleString(), icon:'bi-patch-check', cls:'kpi-bg-info', hint:'Transactions recovered' }
+    ];
+    document.getElementById('kpiRow').innerHTML = items.map(i => `
+        <div class="col-6 col-xl">
+            <div class="card kpi-card h-100"><div class="card-body py-3">
+                <div class="d-flex align-items-start justify-content-between mb-2">
+                    <span class="kpi-label">${i.label}</span>
+                    <span class="kpi-icon ${i.cls}"><i class="bi ${i.icon}"></i></span>
+                </div>
+                <div class="kpi-value">${i.value}</div>
+                <div style="font-size:11.5px;color:var(--muted);margin-top:3px">${i.hint}</div>
+            </div></div>
+        </div>`).join('');
+}
+
+function renderRevChart(o) {
+    const ctx = document.getElementById('revChart');
+    if (revChart) revChart.destroy();
+    const recovered = Math.round(o.recovered_revenue||0);
+    const atRisk = Math.round(o.revenue_at_risk||0);
+    const rate = atRisk > 0 ? (recovered/(recovered+atRisk)*100) : 0;
+    document.getElementById('revStat').textContent = rate.toFixed(1) + '% recovered';
+    revChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Recovered', 'At Risk'],
+            datasets: [{
+                data: [recovered, Math.max(atRisk,0)],
+                backgroundColor: ['#059669', '#d1d5db'],
+                borderColor: '#fff', borderWidth: 3, hoverOffset: 6
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, cutout: '72%',
+            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16, boxWidth: 8 } } }
+        }
+    });
+}
+
+function renderFailureChart(dist) {
+    const ctx = document.getElementById('failureChart');
+    if (failureChart) failureChart.destroy();
+    const keys = Object.keys(dist||{});
+    if (!keys.length) { ctx.parentNode.innerHTML = '<p class="text-muted-sub text-center mt-5">No failure data yet</p>'; return; }
+    const palette = ['#6366f1','#8b5cf6','#22c55e','#f59e0b','#ef4444','#0ea5e9','#10b981'];
+    failureChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: keys.map(k => k.replace(/_/g,' ')),
+            datasets: [{ data: keys.map(k => dist[k]), backgroundColor: palette.slice(0, keys.length), borderWidth: 2, borderColor:'#fff' }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'right', labels: { usePointStyle: true, padding: 10, boxWidth: 8, font: { size: 11 } } } }
+        }
+    });
+}
+
+const STATUS_BADGE = {
+    'SUCCESS':'badge-success','RECOVERED':'badge-success','COMPLETED':'badge-success',
+    'FAILED':'badge-danger','PENDING':'badge-warning','DECLINED':'badge-danger','EXPIRED':'badge-neutral'
+};
+const TX_STATUS_LABEL = { 'RECOVERED':'Recovered','FAILED':'Failed' };
+
+function renderRecentTx(list) {
+    const tb = document.getElementById('recentTxTbody');
+    if (!list || !list.length) { tb.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No transactions yet</td></tr>'; return; }
+    tb.innerHTML = list.slice(0,6).map(t => `
+        <tr class="table-row-link" onclick="location.href='/transactions/${t.transaction_id}'">
+            <td><span class="font-mono" style="font-size:12px">${t.transaction_id}</span></td>
+            <td class="fw-semibold">${App.fmtINR(t.amount)}</td>
+            <td><span style="text-transform:capitalize">${(t.payment_method||'-').replace(/_/g,' ')}</span></td>
+            <td><span class="badge ${STATUS_BADGE[t.status]||'badge-neutral'}">${TX_STATUS_LABEL[t.status]||t.status}</span></td>
+            <td style="white-space:nowrap;font-size:12px;color:var(--muted)">${App.fmtDate(t.created_at)}</td>
+        </tr>`).join('');
+}
+
+function renderActivity(logs) {
+    const tl = document.getElementById('activityTimeline');
+    if (!logs || !logs.length) { tl.innerHTML = '<p class="text-muted-sub py-3">No activity yet</p>'; return; }
+    const icons = { 'LOGIN':'bi-box-arrow-in-right','LOGOUT':'bi-box-arrow-left','AI_PREDICTION':'bi-stars','AI_RECOMMENDATION':'bi-lightbulb','HUMAN_APPROVAL':'bi-hand-thumbs-up','HUMAN_REJECTION':'bi-hand-thumbs-down','RECOVERY_EXECUTION':'bi-play-circle','RECOVERY_RESULT':'bi-flag','POLICY_BLOCKED':'bi-shield-exclamation','REGISTRATION':'bi-person-plus','WEBHOOK':'bi-broadcast' };
+    tl.innerHTML = logs.slice(0,7).map(l => `
+        <div class="timeline-item">
+            <div class="tl-title" style="display:flex;align-items:center;gap:6px"><i class="bi ${icons[l.event_type]||'bi-circle-fill'}" style="color:var(--brand-600)"></i>${String(l.event_type||'-').replace(/_/g,' ')}</div>
+            <div style="font-size:12px;color:var(--ink-600)">${l.reason || (l.actor_type==='AI_AGENT' ? 'System event' : '')}</div>
+            <div class="tl-time">${App.fmtDate(l.created_at)}</div>
+        </div>`).join('');
+}
+
+function renderRecEngine(recommendations) {
+    const row = document.getElementById('recEngineRow');
+    const list = recommendations || [];
+    if (!list.length) {
+        row.innerHTML = `<div class="col-12"><div class="state-box" style="padding:28px">
+            <i class="bi bi-arrow-repeat state-icon"></i>
+            <h5>No pending recommendations</h5>
+            <p style="font-size:13px">Run predictions on failed transactions to populate the recovery queue.</p>
+            <a href="/transactions" class="btn btn-primary btn-sm mt-1">Go to transactions</a>
+        </div></div>`;
+        return;
+    }
+    const ACTION_BADGE = { 'RETRY':'badge-brand','SEND_PAYMENT_LINK':'badge-info','SEND_REMINDER':'badge-warning','ESCALATE':'badge-danger','NO_ACTION':'badge-neutral' };
+    row.innerHTML = list.slice(0,4).map(r => {
+        const t = r.transaction || {};
+        const conf = Math.round((r.confidence||0)*100);
+        const confColor = conf>=70?'var(--success)':conf>=40?'var(--warning)':'var(--danger)';
+        return `<div class="col-md-6 col-xl-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="d-flex align-items-start justify-content-between mb-2">
+                    <div><span class="font-mono" style="font-size:12px">${t.transaction_id||'-'}</span>
+                        <div style="font-size:12px;color:var(--muted)">${App.fmtINR(t.amount)} · ${(t.failure_reason||'-').replace(/_/g,' ')}</div></div>
+                    <span class="badge ${ACTION_BADGE[r.action]||'badge-neutral'}">${r.action||'-'}</span>
+                </div>
+                <div class="mb-1 d-flex justify-content-between" style="font-size:12px">
+                    <span class="text-muted-sub">Recovery probability</span><span style="font-weight:600;color:${confColor}">${conf}%</span>
+                </div>
+                <div class="prob-bar mb-3"><div style="width:${conf}%;background:${confColor}"></div></div>
+                <div class="d-flex align-items-center justify-content-between">
+                    <span>${r.requires_approval ? '<span class="badge badge-danger">Approval needed</span>' : '<span class="badge badge-success">Auto-eligible</span>'}</span>
+                    <a href="/transactions/${t.transaction_id}" class="btn btn-outline btn-sm">Review</a>
+                </div>
+            </div></div>
+        </div>`;
+    }).join('');
+}
+
+async function loadDashboard() {
+    try {
+        const [ov, rec, tx, logs] = await Promise.all([
+            api.get('/api/analytics/overview'),
+            api.get('/api/analytics/recovery'),
+            api.get('/api/transactions?page=1&page_size=6'),
+            api.get('/api/audit-logs?page_size=8')
+        ]);
+        if (ov.success) kpiCards(ov.overview);
+        if (rec.success) {
+            const a = rec.analytics || {};
+            renderFailureChart(a.failure_reason_distribution);
+        }
+        if (ov.success) renderRevChart(ov.overview);
+        if (tx.success) renderRecentTx(tx.transactions);
+        if (logs.success) renderActivity(logs.logs);
+    } catch(e) { console.error(e); App.toast('Failed to load dashboard', 'danger'); }
+}
+
+async function loadRecEngine() {
+    try {
+        const res = await api.get('/api/recovery?page=1&page_size=6');
+        if (res.success) renderRecEngine(res.recommendations);
+    } catch(e) { console.error(e); }
+}
+
+/* ---- Upload & Auto-Recover ---- */
+const OUTCOME_BADGE = {
+    'RECOVERED':'badge-success','NEEDS_APPROVAL':'badge-warning',
+    'BLOCKED':'badge-danger','FAILED':'badge-danger','SKIPPED':'badge-neutral'
+};
+
+function uploadZoneState() {
+    const f = document.getElementById('csvFile');
+    const label = document.getElementById('fileName');
+    if (label && f && f.files && f.files[0]) {
+        label.textContent = f.files[0].name;
+        const bn = document.getElementById('batchName');
+        if (bn) bn.placeholder = f.files[0].name.replace(/\.csv$/i, '');
+    }
+}
+
+function renderBatches(batches) {
+    const el = document.getElementById('batchesBox');
+    if (!batches || !batches.length) {
+        el.innerHTML = '<div class="state-box py-4"><i class="bi bi-inbox state-icon"></i><p style="font-size:13px">No uploads yet. Upload a CSV to create your first batch.</p></div>';
+        return;
+    }
+    el.innerHTML = `<div class="recover-tbl-wrap"><table class="table align-middle">
+        <thead><tr>
+            <th>Batch / Source</th>
+            <th class="text-end">Transactions</th>
+            <th class="text-end">Value</th>
+            <th class="text-end">Recovered</th>
+            <th class="text-end">Recovered value</th>
+            <th class="text-end">Needs action</th>
+            <th class="text-end">View</th>
+        </tr></thead>
+        <tbody>${batches.map(b=>`
+            <tr>
+                <td><span class="font-mono" style="font-size:12.5px;font-weight:600;color:var(--ink-900)">${b.source}</span></td>
+                <td class="text-end">${b.transaction_count}</td>
+                <td class="text-end fw-semibold">${App.fmtINR(b.total_amount)}</td>
+                <td class="text-end"><span class="badge badge-success">${b.recovered_count}</span></td>
+                <td class="text-end text-success fw-semibold">${App.fmtINR(b.recovered_amount)}</td>
+                <td class="text-end"><span class="badge ${b.at_risk_count>0?'badge-warning':'badge-neutral'}">${b.at_risk_count}</span></td>
+                <td class="text-end"><a class="btn btn-outline btn-sm px-2" href="/transactions?source=${encodeURIComponent(b.source)}" title="Only this batch"><i class="bi bi-filter"></i></a></td>
+            </tr>`).join('')}
+        </tbody></table></div>`;
+}
+
+async function loadBatches() {
+    try {
+        const res = await api.get('/api/transactions/import-batches');
+        if (res.success) renderBatches(res.batches);
+    } catch(e) { console.error(e); }
+}
+
+function renderReport(r) {
+    const el = document.getElementById('recoverReport');
+    const items = r.items || [];
+    const summary = [
+        { label:'Parsed rows', value:r.created||0 },
+        { label:'Auto-recovered', value:r.recovered_count||0, cls:'text-success' },
+        { label:'Recovered revenue', value:App.fmtINR(r.recovered_revenue), cls:'text-success' },
+        { label:'Needs approval', value:r.needs_approval_count||0, cls:'text-warning' },
+        { label:'Blocked / failed', value:r.blocked_count||0, cls:'text-danger' },
+        { label:'Skipped', value:r.skipped||0 }
+    ];
+    const errHtml = (r.errors && r.errors.length)
+        ? `<div class="alert alert-warning py-2 mt-3" style="font-size:12.5px"><i class="bi bi-exclamation-triangle me-1"></i>${r.errors.slice(0,6).join('<br>')}</div>` : '';
+    const tableHtml = items.length ? `<div class="recover-tbl-wrap mt-3"><table class="table">
+        <thead><tr><th>Transaction</th><th class="text-end">Amount</th><th class="text-end">Prob.</th><th>Action</th><th>Outcome</th><th>Reason</th></tr></thead>
+        <tbody>${items.map(i=>`
+            <tr>
+                <td><span class="font-mono" style="font-size:12px">${i.transaction_id||'-'}</span></td>
+                <td class="text-end fw-semibold">${App.fmtINR(i.amount)}</td>
+                <td class="text-end">${i.prediction_probability!=null ? Math.round(i.prediction_probability*100)+'%' : '—'}</td>
+                <td><span class="badge badge-brand">${i.action||'—'}</span></td>
+                <td><span class="badge ${OUTCOME_BADGE[i.status]||'badge-neutral'}">${String(i.status||'—').replace(/_/g,' ')}</span>${i.sim_mode?` <span class="badge badge-neutral">${i.sim_mode}</span>`:''}</td>
+                <td style="font-size:12.5px;color:var(--ink-600)">${i.reason||'—'}</td>
+            </tr>`).join('')}
+        </tbody></table></div>` : '';
+    el.innerHTML = `<div class="mt-3 pt-3" style="border-top:1px solid var(--border)">
+        <div class="d-flex flex-wrap gap-2 mb-2">
+            ${summary.map(s=>`<span class="report-pill">${s.label}: <strong class="${s.cls||''}">${s.value}</strong></span>`).join('')}
+        </div>
+        ${errHtml}
+        ${tableHtml}
+    </div>`;
+    el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+
+async function uploadAndRecover() {
+    const fileInput = document.getElementById('csvFile');
+    const btn = document.getElementById('autoRecoverBtn');
+    const report = document.getElementById('recoverReport');
+    if (!fileInput.files || !fileInput.files[0]) {
+        App.toast('Choose a CSV file first (use the Sample CSV to test)', 'warning');
+        return;
+    }
+    const file = fileInput.files[0];
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        App.toast('Only CSV files are supported', 'danger');
+        return;
+    }
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<span class="btn-spinner"></span> Processing…';
+    report.innerHTML = '<div class="state-box py-4 mt-3"><i class="bi bi-arrow-repeat state-icon"></i><p style="font-size:13px">Running prediction, recommendation and recovery engine…</p></div>';
+    try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const bn = document.getElementById('batchName');
+        fd.append('source', (bn && bn.value && bn.value.trim()) ? bn.value.trim() : file.name.replace(/\.csv$/i, ''));
+        const res = await api.upload('/api/transactions/auto-recover', fd);
+        if (res.success) {
+            renderReport(res.report);
+            App.toast('Auto-recover complete', 'success');
+            if (bn) bn.value = '';
+            loadDashboard();
+            loadRecEngine();
+            loadBatches();
+        } else {
+            report.innerHTML = '';
+            App.toast(res.error?.message || 'Auto-recover failed', 'danger');
+        }
+    } catch(e) {
+        console.error(e);
+        report.innerHTML = '';
+        App.toast('Auto-recover failed', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+document.getElementById('csvFile').addEventListener('change', uploadZoneState);
+const dropZone = document.getElementById('uploadZone');
+if (dropZone) {
+    ['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    }));
+    ['dragleave','dragend'].forEach(ev => dropZone.addEventListener(ev, e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+    }));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            App.toast('Only CSV files are supported', 'danger');
+            return;
+        }
+        try {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('csvFile').files = dt.files;
+        } catch (_) { return; }
+        uploadZoneState();
+        App.toast(`Selected ${file.name} — click "Upload & Auto-Recover"`, 'success');
+    });
+}
+if (window.App && App.user && App.user.role && App.user.role !== 'MERCHANT_ADMIN') {
+    const zone = document.getElementById('uploadZone');
+    if (zone) {
+        zone.style.pointerEvents = 'none';
+        zone.style.opacity = 0.55;
+    }
+    const ub = document.getElementById('autoRecoverBtn');
+    if (ub) ub.disabled = true;
+}
+
+loadDashboard();
+loadRecEngine();
+loadBatches();
+</script>
+{% endblock %}

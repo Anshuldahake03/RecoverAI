@@ -1,0 +1,16 @@
+customer_id,transaction_id,amount,currency,payment_method,status,failure_reason,retry_count,previous_success_count,previous_failure_count,historical_success_rate,account_age_days
+CUST-101,SPL-TXN-2001,3200.00,INR,upi,FAILED,temporary_failure,0,14,2,0.88,360
+CUST-102,SPL-TXN-2002,450.00,INR,wallet,FAILED,insufficient_funds,0,2,7,0.22,30
+CUST-103,SPL-TXN-2003,18200.00,INR,card,FAILED,technical_error,0,21,5,0.81,540
+CUST-104,SPL-TXN-2004,999.00,INR,upi,FAILED,authentication_failed,0,9,1,0.90,1100
+CUST-105,SPL-TXN-2005,5750.00,INR,netbanking,FAILED,temporary_failure,0,17,3,0.85,480
+CUST-106,SPL-TXN-2006,12500.00,INR,emi,FAILED,bank_declined,0,23,6,0.79,690
+CUST-107,SPL-TXN-2007,230.00,INR,upi,FAILED,technical_error,1,3,6,0.33,45
+CUST-108,SPL-TXN-2008,860.00,INR,card,FAILED,card_expired,0,1,3,0.25,20
+CUST-109,SPL-TXN-2009,4100.00,INR,wallet,FAILED,temporary_failure,1,12,4,0.75,275
+CUST-110,SPL-TXN-2010,1550.00,INR,upi,FAILED,authentication_failed,0,8,2,0.80,95
+CUST-111,SPL-TXN-2011,21000.00,INR,netbanking,FAILED,temporary_failure,0,25,3,0.89,830
+CUST-112,SPL-TXN-2012,680.00,INR,upi,FAILED,insufficient_funds,0,5,9,0.36,55
+CUST-113,SPL-TXN-2013,5400.00,INR,card,FAILED,technical_error,0,13,6,0.68,125
+CUST-114,SPL-TXN-2014,300.00,INR,upi,FAILED,bank_declined,0,1,4,0.20,15
+CUST-115,SPL-TXN-2015,7250.00,INR,netbanking,FAILED,temporary_failure,0,18,4,0.82,420

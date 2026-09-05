@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Notifications - RecoverAI{% endblock %}
+{% block page_title %}Notifications{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Inbox</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" id="markAllBtn" onclick="markAll()"><i class="bi bi-check2-all me-1"></i>Mark all read</button>
+{% endblock %}
+
+{% block body %}
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-body p-0" id="notifList">
+                <div class="state-box"><div class="spinner-border spinner"></div></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-body">
+                <h6 class="card-title mb-3">Inbox summary</h6>
+                <div class="detail-row"><span class="dt">Total notifications</span><span class="dd" id="nTotal">0</span></div>
+                <div class="detail-row"><span class="dt">Unread</span><span class="dd text-danger" id="nUnread">0</span></div>
+                <div class="detail-row"><span class="dt">Last activity</span><span class="dd" id="nLast">—</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPage = 1;
+const pageSize = 15;
+let loading = false;
+
+const NOTIF_ICON = {
+    'RECOVERY_COMPLETED':'bi-check-circle-fill','RECOVERY_FAILED':'bi-x-circle-fill',
+    'HUMAN_APPROVAL_REQUIRED':'bi-bell-fill','POLICY_BLOCKED':'bi-shield-exclamation',
+    'AI_RECOMMENDATION':'bi-lightbulb-fill','PAYMENT_LINK':'bi-link-45deg','SYSTEM':'bi-gear-fill'
+};
+const NOTIF_COLOR = {
+    'RECOVERY_COMPLETED':'var(--success)','RECOVERY_FAILED':'var(--danger)',
+    'HUMAN_APPROVAL_REQUIRED':'var(--warning)','POLICY_BLOCKED':'var(--danger)',
+    'AI_RECOMMENDATION':'var(--brand-500)','PAYMENT_LINK':'var(--info)'
+};
+
+function renderList(ns, append=false) {
+    const el = document.getElementById('notifList');
+    if (append) {
+        el.insertAdjacentHTML('beforeend', ns.map(item).join(''));
+        while (el.querySelector('.load-more-btn')) el.querySelector('.load-more-btn').remove();
+        if (currentPage * pageSize < (window._nTotal||0)) el.insertAdjacentHTML('beforeend', moreBtn());
+        return;
+    }
+    if (!ns.length) {
+        el.innerHTML = `<div class="state-box py-5"><i class="bi bi-inbox state-icon"></i>
+            <h5>No notifications yet</h5>
+            <p style="font-size:13px">Recovery events and approvals will appear here.</p></div>`;
+        return;
+    }
+    el.innerHTML = ns.map(item).join('') + ((currentPage * pageSize < (window._nTotal||0)) ? moreBtn() : '');
+}
+
+function item(n) {
+    const read = n.is_read;
+    const color = NOTIF_COLOR[n.type] || 'var(--brand-500)';
+    return `<div class="d-flex align-items-start p-3 ${read?'':'bg-light'}" style="${read?'':'border-left:3px solid '+color};cursor:pointer" onclick="openNotif('${n.id}','${read?1:0}')">
+        <span style="width:38px;height:38px;border-radius:10px;background:${color}18;color:${color};display:flex;align-items:center;justify-content:center;margin-right:12px;flex:0 0 38px"><i class="bi ${NOTIF_ICON[n.type]||'bi-bell'}"></i></span>
+        <div class="flex-grow-1">
+            <div style="font-size:13.5px;color:var(--ink-800)">${n.message||''}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${n.type||'SYSTEM'} · ${App.fmtDate(n.created_at)}</div>
+        </div>
+        ${read ? '' : '<span class="badge badge-brand ms-2">new</span>'}
+    </div>`;
+}
+
+function moreBtn() {
+    return `<div class="text-center py-3" style="border-top:1px solid var(--ink-100)"><button class="btn btn-outline btn-sm load-more-btn" onclick="loadMore()">Load more</button></div>`;
+}
+
+async function loadNotifs(append=false) {
+    if (loading) return;
+    loading = true;
+    try {
+        const res = await api.get(`/api/notifications?page=${currentPage}&page_size=${pageSize}`);
+        if (res.success) {
+            window._nTotal = res.total||0;
+            document.getElementById('nTotal').textContent = res.total||0;
+            document.getElementById('nUnread').textContent = res.unread_count||0;
+            const list = res.notifications||[];
+            if (list.length && res.notifications && res.notifications[0]) {
+                document.getElementById('nLast').textContent = App.fmtDate(res.notifications[0].created_at);
+            }
+            if (append) {
+                const el = document.getElementById('notifList');
+                el.insertAdjacentHTML('beforeend', renderList(list));
+                el.querySelector('button')?.remove();
+            } else {
+                renderList(list);
+            }
+        }
+    } catch(e) { console.error(e); }
+    loading = false;
+}
+
+function loadMore() { currentPage++; loadNotifs(true); }
+
+function openNotif(id, read) {
+    if (!id) return;
+    (async () => {
+        if (!read) { await api.patch(`/api/notifications/${id}/read`); }
+        App.refreshNotifBadge();
+    })();
+}
+
+async function markAll() {
+    const res = await api.patch('/api/notifications/read-all');
+    if (res.success) { App.toast('All notifications marked as read'); App.refreshNotifBadge(); currentPage=1; loadNotifs(); }
+    else App.toast(res.error?.message||'Failed', 'danger');
+}
+
+loadNotifs();
+</script>
+{% endblock %}

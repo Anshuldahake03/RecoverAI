@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Analytics - RecoverAI{% endblock %}
+{% block page_title %}Analytics{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Performance insights</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" onclick="loadAnalytics()"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+{% endblock %}
+
+{% block body %}
+<!-- KPI CARDS -->
+<div class="row g-3 mb-4" id="kpiRow"></div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-5">
+        <div class="card h-100"><div class="card-body">
+            <h6 class="card-title mb-3">Failure Reason Distribution</h6>
+            <div class="chart-wrap"><canvas id="failureChart" class="chart-box"></canvas></div>
+        </div></div>
+    </div>
+    <div class="col-lg-7">
+        <div class="card h-100"><div class="card-body">
+            <h6 class="card-title mb-3">Recovery Revenue</h6>
+            <div class="chart-wrap"><canvas id="revChart" class="chart-box"></canvas></div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-body">
+            <h6 class="card-title mb-3">Batch Recovery Experiment</h6>
+            <div id="batchReport"></div>
+        </div></div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-body">
+            <h6 class="card-title mb-3">Model Metrics</h6>
+            <div id="modelMetrics"></div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card"><div class="card-body">
+            <h6 class="card-title mb-3">Action Outcomes</h6>
+            <div id="actionOutcomes"></div>
+        </div></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let failureChart, revChart;
+
+function kpiCards(o) {
+    const recovered = Math.round(o.recovered_revenue||0), atRisk=Math.round(o.revenue_at_risk||0);
+    const rate = atRisk>0 ? (recovered/(recovered+atRisk)*100) : 0;
+    const items=[
+        {label:'Total transactions', value:(o.total_transactions||0).toLocaleString(), icon:'bi-stack', cls:'kpi-bg-brand'},
+        {label:'Failed transactions', value:(o.failed_transactions||0).toLocaleString(), icon:'bi-x-circle', cls:'kpi-bg-danger'},
+        {label:'Revenue at risk', value:App.fmtINR(atRisk), icon:'bi-exclamation-triangle', cls:'kpi-bg-warning'},
+        {label:'Recovered revenue', value:App.fmtINR(recovered), icon:'bi-cash-stack', cls:'kpi-bg-success'},
+        {label:'Recovery rate', value:rate.toFixed(1)+'%', icon:'bi-graph-up-arrow', cls:'kpi-bg-info'}
+    ];
+    document.getElementById('kpiRow').innerHTML = items.map(i=>`
+        <div class="col-6 col-xl"><div class="card kpi-card h-100"><div class="card-body py-3">
+            <span class="kpi-label d-block mb-2">${i.label}</span>
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="kpi-value">${i.value}</div>
+                <span class="kpi-icon ${i.cls}"><i class="bi ${i.icon}"></i></span>
+            </div>
+        </div></div></div>`).join('');
+}
+
+function renderFailure(dist) {
+    const el=document.getElementById('failureChart');
+    const keys=Object.keys(dist||{});
+    if(!keys.length){ el.parentNode.innerHTML='<div class="state-box py-5"><i class="bi bi-pie-chart state-icon"></i><p style="font-size:13px">No failure data</p></div>'; return; }
+    if(failureChart) failureChart.destroy();
+    const palette=['#6366f1','#8b5cf6','#22c55e','#f59e0b','#ef4444','#0ea5e9','#10b981'];
+    failureChart=new Chart(el,{type:'pie',data:{labels:keys.map(k=>k.replace(/_/g,' ')),datasets:[{data:keys.map(k=>dist[k]),backgroundColor:palette.slice(0,keys.length),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{usePointStyle:true,boxWidth:8,font:{size:11}}}}}});
+}
+
+function fmtPeriod(p) {
+    if(!p || p.length<7) return p||'—';
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const y=+p.slice(0,4), m=+p.slice(5,7);
+    return months[m-1]+' '+y;
+}
+
+function renderRev(trend) {
+    const el=document.getElementById('revChart');
+    const periods=(trend&&trend.periods)||[];
+    if(!periods.length){ el.parentNode.innerHTML='<div class="state-box py-5"><i class="bi bi-graph-up state-icon"></i><p style="font-size:13px">No recovery trend yet</p></div>'; return; }
+    if(revChart) revChart.destroy();
+    const labels=periods.map(fmtPeriod);
+    revChart=new Chart(el,{type:'line',
+        data:{labels,
+            datasets:[
+                {label:'Recovered', data:trend.recovered_revenue||[], borderColor:'#059669', backgroundColor:'rgba(5,150,105,0.12)', fill:true, tension:0.35, borderWidth:2.5, pointBackgroundColor:'#059669', pointRadius:3.5, pointHoverRadius:5},
+                {label:'At risk', data:trend.at_risk_revenue||[], borderColor:'#8b9bb4', backgroundColor:'rgba(139,155,180,0.06)', fill:false, tension:0.35, borderWidth:2, borderDash:[5,5], pointBackgroundColor:'#8b9bb4', pointRadius:3, pointHoverRadius:5}
+            ]},
+        options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+            plugins:{legend:{position:'top',align:'end',labels:{usePointStyle:true,boxWidth:7,font:{size:11}}},tooltip:{callbacks:{label:ctx=>' '+ctx.dataset.label+': '+App.fmtINR(ctx.parsed.y)}}},
+            scales:{x:{grid:{display:false},ticks:{font:{size:11}}},y:{beginAtZero:true,grid:{color:'#f0f2f7'},ticks:{callback:v=>'₹'+(v>=1000?(v/1000)+'k':v)}}}}});
+}
+
+function renderBatch(b) {
+    const el=document.getElementById('batchReport');
+    if(!b){ el.innerHTML='<p class="text-muted-sub py-3">No batch report available</p>'; return; }
+    const rate = b.revenue_recovery_rate||0;
+    el.innerHTML=`<div class="table-wrap"><table class="table">
+        <tbody>
+        <tr><td class="dt" style="padding:9px 0">Batch size</td><td class="dd" style="padding:9px 0" class="">${b.batch_size||0}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Eligible cases</td><td style="padding:9px 0;text-align:right;font-weight:600">${b.eligible_cases||0}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Actions attempted</td><td style="padding:9px 0;text-align:right;font-weight:600">${b.actions_attempted||0}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Successful recoveries</td><td style="padding:9px 0;text-align:right;font-weight:600;color:var(--success)">${b.successful_recoveries||0}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Recovered revenue</td><td style="padding:9px 0;text-align:right;font-weight:600;color:var(--success)">${App.fmtINR(b.recovered_revenue)}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Revenue at risk</td><td style="padding:9px 0;text-align:right;font-weight:600;color:var(--danger)">${App.fmtINR(b.revenue_at_risk)}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Revenue recovery rate</td><td style="padding:9px 0;text-align:right;font-weight:600">${rate? rate.toFixed(1)+'%':'—'}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Policy blocked</td><td style="padding:9px 0;text-align:right;font-weight:600">${b.policy_blocked_cases||0}</td></tr>
+        <tr><td style="padding:9px 0;color:var(--muted);font-size:12.5px">Escalated</td><td style="padding:9px 0;text-align:right;font-weight:600">${b.escalated_cases||0}</td></tr>
+        </tbody></table></div>`;
+}
+
+function renderModel(m) {
+    const el=document.getElementById('modelMetrics');
+    if(!m){ el.innerHTML='<p class="text-muted-sub py-3">No model metrics available</p>'; return; }
+    const avg = m.avg_probability;
+    el.innerHTML=`<div class="row g-2">
+        <div class="col-6"><div class="bg-light rounded-3 p-3 text-center"><div style="font-size:11px;color:var(--muted)">PREDICTIONS</div><div style="font-size:20px;font-weight:700">${m.total_predictions||0}</div></div></div>
+        <div class="col-6"><div class="bg-light rounded-3 p-3 text-center"><div style="font-size:11px;color:var(--muted)">AVG PROBABILITY</div><div style="font-size:20px;font-weight:700">${avg? (avg*100).toFixed(1)+'%':'—'}</div></div></div>
+        <div class="col-4"><div class="bg-light rounded-3 p-3 text-center"><div style="font-size:11px;color:var(--muted)">HIGH</div><div style="font-size:16px;font-weight:700;color:var(--success)">${m.high_confidence_count||0}</div></div></div>
+        <div class="col-4"><div class="bg-light rounded-3 p-3 text-center"><div style="font-size:11px;color:var(--muted)">MEDIUM</div><div style="font-size:16px;font-weight:700;color:var(--warning)">${m.medium_confidence_count||0}</div></div></div>
+        <div class="col-4"><div class="bg-light rounded-3 p-3 text-center"><div style="font-size:11px;color:var(--muted)">LOW</div><div style="font-size:16px;font-weight:700;color:var(--danger)">${m.low_confidence_count||0}</div></div></div>
+        <div class="col-12 mt-2"><div class="detail-row"><span class="dt">Model version</span><span class="dd font-mono">${m.model_version||'—'}</span></div></div>
+    </div>`;
+}
+
+function renderOutcomes(outcomes) {
+    const el=document.getElementById('actionOutcomes');
+    if(!outcomes || !outcomes.length){
+        el.innerHTML='<div class="state-box py-4"><i class="bi bi-arrow-repeat state-icon"></i><p style="font-size:13px">No recovery actions executed yet. Outcomes will appear once recovery flows run.</p></div>';
+        return;
+    }
+    el.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>Action</th><th class="text-end">Success</th><th class="text-end">Failed</th><th class="text-end">Pending</th><th class="text-end">Total</th></tr></thead><tbody>
+    ${outcomes.map(o=>{const sc=o.status_counts||{}; const total=Object.values(sc).reduce((a,b)=>a+b,0); return `<tr><td><span class="badge badge-brand">${o.action}</span></td><td class="text-end text-success fw-semibold">${sc.COMPLETED||0}</td><td class="text-end text-danger fw-semibold">${(sc.FAILED||0)+(sc.REJECTED||0)}</td><td class="text-end fw-semibold">${sc.PENDING||0}</td><td class="text-end fw-semibold">${total}</td></tr>`;}).join('')}
+    </tbody></table></div>`;
+}
+
+async function loadAnalytics() {
+    try {
+        const [ov, rec, model, batch, trend] = await Promise.all([
+            api.get('/api/analytics/overview'),
+            api.get('/api/analytics/recovery'),
+            api.get('/api/analytics/model'),
+            api.get('/api/analytics/batch-report'),
+            api.get('/api/analytics/recovery-trend')
+        ]);
+        if(ov.success){ const o=ov.overview; kpiCards(o); }
+        if(rec.success){ const a=rec.analytics||{}; renderFailure(a.failure_reason_distribution); renderOutcomes(a.action_outcomes); }
+        if(model.success) renderModel(model.metrics);
+        if(batch.success) renderBatch(batch.report);
+        if(trend.success) renderRev(trend.trend);
+    } catch(e){ console.error(e); App.toast('Failed to load analytics','danger'); }
+}
+
+loadAnalytics();
+</script>
+{% endblock %}

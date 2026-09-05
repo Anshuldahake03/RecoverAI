@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Audit Logs - RecoverAI{% endblock %}
+{% block page_title %}Audit Logs{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Immutable activity trail</li>
+{% endblock %}
+{% block tb_actions %}
+<button class="btn btn-outline btn-sm" onclick="loadLogs(txPage)"><i class="bi bi-arrow-clockwise me-1"></i>Refresh</button>
+<span class="badge badge-brand ms-1"><i class="bi bi-shield-lock me-1"></i>Admin only</span>
+{% endblock %}
+
+{% block body %}
+<div class="filter-bar">
+    <div class="row g-2 align-items-center">
+        <div class="col-12 col-md-3">
+            <input type="text" class="form-control" id="fTxn" placeholder="Filter by TXN ID...">
+        </div>
+        <div class="col-6 col-md-3">
+            <select class="form-select" id="fEvent">
+                <option value="">All event types</option>
+                <option value="LOGIN">LOGIN</option>
+                <option value="LOGOUT">LOGOUT</option>
+                <option value="REGISTRATION">REGISTRATION</option>
+                <option value="AI_PREDICTION">AI_PREDICTION</option>
+                <option value="AI_RECOMMENDATION">AI_RECOMMENDATION</option>
+                <option value="HUMAN_APPROVAL">HUMAN_APPROVAL</option>
+                <option value="HUMAN_REJECTION">HUMAN_REJECTION</option>
+                <option value="RECOVERY_EXECUTION">RECOVERY_EXECUTION</option>
+                <option value="RECOVERY_RESULT">RECOVERY_RESULT</option>
+                <option value="POLICY_BLOCKED">POLICY_BLOCKED</option>
+                <option value="WEBHOOK">WEBHOOK</option>
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <button class="btn btn-primary w-100" onclick="loadLogs(1)"><i class="bi bi-search"></i></button>
+        </div>
+        <div class="col-12 text-muted-sub" style="font-size:12px">
+            <i class="bi bi-info-circle me-1"></i>Ledger-backed: predicates executed in the demo are marked per action.
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Event</th>
+                        <th>Actor</th>
+                        <th>Reason</th>
+                        <th>Transaction</th>
+                        <th class="text-end">Details</th>
+                    </tr>
+                </thead>
+                <tbody id="logTbody"></tbody>
+            </table>
+        </div>
+        <div id="logState" style="display:none"></div>
+    </div>
+</div>
+
+<div class="d-flex align-items-center justify-content-between mt-3 flex-wrap gap-2">
+    <div class="text-muted-sub" style="font-size:12.5px" id="logMeta">—</div>
+    <nav><ul class="pagination pagination-sm mb-0" id="logPagination"></ul></nav>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let txPage=1, logTotal=0, logTotalPages=1;
+const EVENT_CLS={'LOGIN':'badge-info','LOGOUT':'badge-neutral','REGISTRATION':'badge-brand','AI_PREDICTION':'badge-brand','AI_RECOMMENDATION':'badge-brand','HUMAN_APPROVAL':'badge-success','HUMAN_REJECTION':'badge-danger','RECOVERY_EXECUTION':'badge-info','RECOVERY_RESULT':'badge-warning','POLICY_BLOCKED':'badge-danger','WEBHOOK':'badge-neutral'};
+
+async function loadLogs(page=1){
+    txPage=page;
+    const tb=document.getElementById('logTbody');
+    tb.innerHTML=`<tr><td colspan="6"><div class="state-box" style="padding:40px"><div class="spinner-border spinner"></div></div></td></tr>`;
+    document.getElementById('logState').style.display='none';
+    const params=new URLSearchParams({page:txPage,page_size:25});
+    const txn=document.getElementById('fTxn').value.trim();
+    if(txn) params.set('transaction_id',txn);
+    const ev=document.getElementById('fEvent').value;
+    if(ev) params.set('event_type',ev);
+    try{
+        const res=await api.get('/api/audit-logs?'+params.toString());
+        if(res.success===false){
+            if(res.error?.code==='FORBIDDEN'){ showState('This page requires MERCHANT_ADMIN access. Your current role cannot view audit logs.',true); }
+            else showState('Error loading audit logs',true);
+            return;
+        }
+        const list=res.logs||[];
+        tb.innerHTML=list.map(renderRow).join('');
+        logTotal=res.total; logTotalPages=res.total_pages;
+        document.getElementById('logMeta').textContent=`${list.length} of ${res.total} events`;
+        renderPagination();
+        if(!list.length){tb.innerHTML='';showState('No audit events match your filters.');}
+    }catch(e){console.error(e);showState('Failed to load audit logs',true);}
+}
+
+function renderRow(l){
+    const actor = l.actor_type==='AI_AGENT'?'<span class="badge badge-brand">AI</span>':(l.actor_type==='SYSTEM'?'<span class="badge badge-neutral">SYSTEM</span>':'<span class="badge badge-info">USER</span>');
+    const hasData = l.new_state || l.previous_state || l.model_version;
+    return `<tr>
+        <td style="white-space:nowrap;font-size:12px;color:var(--muted)">${App.fmtDate(l.created_at)}</td>
+        <td><span class="badge ${EVENT_CLS[l.event_type]||'badge-neutral'}">${l.event_type||'-'}</span></td>
+        <td>${actor}${l.model_version?` <span class="font-mono" style="font-size:11px;color:var(--muted)">v${l.model_version}</span>`:''}</td>
+        <td style="max-width:260px;font-size:12.5px">${l.reason||'—'}</td>
+        <td>${l.transaction_id?`<span class="font-mono" style="font-size:11.5px">${l.transaction_id}</span>`:'—'}</td>
+        <td class="text-end">${hasData?`<button class="btn btn-ghost btn-sm" onclick="toggleJson(this,'${l.id}')"><i class="bi bi-chevron-down"></i></button>`:'—'}</td>
+    </tr>
+    <tr id="jsonRow${l.id}" style="display:none"><td colspan="6"><pre class="bg-light rounded-3 p-3 mb-0" style="font-size:12px;max-height:220px;overflow:auto;margin:8px">${esc(JSON.stringify({previous:l.previous_state,new:l.new_state,correlation:l.correlation_id},null,2))}</pre></td></tr>`;
+}
+
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function toggleJson(btn,id){
+    const row=document.getElementById('jsonRow'+id);
+    const show=row.style.display==='none';
+    row.style.display=show?'':'none';
+    btn.innerHTML=show?'<i class="bi bi-chevron-up"></i>':'<i class="bi bi-chevron-down"></i>';
+}
+
+function showState(msg,isErr=false){
+    const s=document.getElementById('logState');
+    s.style.display='block';
+    s.innerHTML=`<div class="state-box" style="padding:44px"><i class="bi ${isErr?'bi-shield-exclamation':'bi-journal-text'} state-icon"></i><h5>${isErr?'Restricted or unavailable':'No events'}</h5><p style="font-size:13px;max-width:420px;margin:0 auto">${msg}</p></div>`;
+    document.getElementById('logTbody').innerHTML='';
+}
+
+function renderPagination(){
+    const nav=document.getElementById('logPagination');
+    if(logTotalPages<=1){nav.innerHTML='';return;}
+    let h=`<li class="page-item ${txPage<=1?'disabled':''}"><button class="page-link" onclick="loadLogs(${txPage-1})"><i class="bi bi-chevron-left"></i></button></li>`;
+    for(let p=1;p<=logTotalPages;p++){if(logTotalPages>8&&p>1&&p<logTotalPages&&Math.abs(p-txPage)>2){if(p===2)h+=`<li class="page-item disabled"><span class="page-link">…</span></li>`;continue;}h+=`<li class="page-item ${p===txPage?'active':''}"><button class="page-link" onclick="loadLogs(${p})">${p}</button></li>`;}
+    h+=`<li class="page-item ${txPage>=logTotalPages?'disabled':''}"><button class="page-link" onclick="loadLogs(${txPage+1})"><i class="bi bi-chevron-right"></i></button></li>`;
+    nav.innerHTML=h;
+}
+
+document.getElementById('fTxn').addEventListener('keydown',e=>{if(e.key==='Enter')loadLogs(1);});
+document.getElementById('fEvent').addEventListener('change',()=>loadLogs(1));
+loadLogs();
+</script>
+{% endblock %}
