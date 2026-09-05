@@ -54,7 +54,9 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    if: github.ref == 'refs/heads/main' && env.RAILWAY_TOKEN != ''
 
     steps:
       - uses: actions/checkout@v4
