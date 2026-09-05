@@ -74,6 +74,10 @@ The app runs on **SQLite out of the box** (absolute path configured via `.env`).
 # Seed the database with demo users, customers, and transactions
 python scripts/seed.py
 
+# OR: seeding is fully automatic on deploy — run.py seeds an EMPTY database
+# on first boot (idempotent; never touches existing data). Demo login:
+# admin@recoverai.com / admin123   (reviewer@recoverai.com / reviewer123)
+
 # Generate a larger synthetic dataset + train the ML model
 python scripts/generate_dataset.py
 python -c "from app.ml.train import train_model; train_model()"

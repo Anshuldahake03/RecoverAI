@@ -30,5 +30,10 @@ with app.app_context():
         ).update({'source': source}, synchronize_session=False)
     db.session.commit()
 
+    # Auto-seed demo users + data on a fresh database (idempotent)
+    from app.services.seed_service import seed_data_if_empty
+    if seed_data_if_empty():
+        print("Seeded demo users (admin@recoverai.com / admin123) and 500 sample transactions")
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
